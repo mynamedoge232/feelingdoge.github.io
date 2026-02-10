@@ -1,87 +1,131 @@
-<!doctype html>
-<html>
+<!DOCTYPE html>
+<html lang="en">
 <head>
-<meta charset="utf-8">
-<title>Feeling Tracker</title>
-
-<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
-
-<script>
-/* 🔴 PASTE YOUR FIREBASE CONFIG HERE */
-const firebaseConfig = {
-  apiKey: "PASTE_HERE",
-  authDomain: "PASTE_HERE",
-  projectId: "PASTE_HERE"
-};
-
-firebase.initializeApp(firebaseConfig);
-const auth = firebase.auth();
-const db = firebase.firestore();
-</script>
-
-<style>
-body { font-family: system-ui; padding:20px }
-button { margin:6px; padding:10px 14px }
-</style>
+  <meta charset="UTF-8">
+  <title>Feeling Tracker</title>
+  <style>
+    body { font-family: Arial; padding: 20px; }
+    button { margin: 5px 0; }
+    select, input { margin: 5px 0; }
+    pre { background: #f4f4f4; padding: 10px; max-height: 300px; overflow: auto; }
+  </style>
 </head>
-
 <body>
 
 <h2>Feeling Tracker</h2>
-<p id="status">Connecting…</p>
 
-<div id="app" style="display:none">
-  <button onclick="save('green')">🟢 Green (Happy)</button>
-  <button onclick="save('yellow')">🟡 Yellow (Upset)</button>
-  <button onclick="save('red')">🔴 Red (Angry)</button>
-  <button onclick="save('blue')">🔵 Blue (Tired)</button>
+<label>User ID:</label><br>
+<input id="userId" placeholder="your name or id"><br><br>
 
-  <h3>Entries</h3>
-  <ul id="list"></ul>
-</div>
+<label>Zone:</label><br>
+<select id="zone">
+  <option value="">Select zone</option>
+  <option value="green">🟢 Green</option>
+  <option value="blue">🔵 Blue</option>
+  <option value="yellow">🟡 Yellow</option>
+  <option value="red">🔴 Red</option>
+</select><br><br>
 
-<script>
-function autoBreak(zone){
-  return (zone === 'red' || zone === 'blue');
-}
+<label>
+  <input type="checkbox" id="break">
+  On Break
+</label><br><br>
 
-function save(zone){
-  const user = auth.currentUser;
-  if(!user) return;
+<button onclick="saveFeeling()">Save Feeling</button>
 
-  db.collection("entries").add({
-    uid: user.uid,
-    zone,
-    needBreak: autoBreak(zone),
-    time: new Date().toLocaleString()
-  });
-}
+<hr>
 
-function load(){
-  const user = auth.currentUser;
-  db.collection("entries")
-    .where("uid","==",user.uid)
-    .orderBy("time","desc")
-    .onSnapshot(snap=>{
-      list.innerHTML="";
-      snap.forEach(d=>{
-        const e=d.data();
-        list.innerHTML += `<li>${e.time} — ${e.zone} — break: ${e.needBreak}</li>`;
-      });
+<h3>Respond to Someone</h3>
+
+<input id="targetUser" placeholder="target user id"><br>
+<select id="responseZone">
+  <option value="">Select zone</option>
+  <option value="green">🟢 Green</option>
+  <option value="blue">🔵 Blue</option>
+  <option value="yellow">🟡 Yellow</option>
+  <option value="red">🔴 Red</option>
+</select><br><br>
+
+<button onclick="respond()">Send Response</button>
+
+<hr>
+
+<button onclick="exportJSON()">Export JSON</button>
+
+<pre id="output"></pre>
+
+<!-- Firebase v9 -->
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/9.23.0/firebase-app.js";
+  import { getDatabase, ref, set, push, get } from "https://www.gstatic.com/firebasejs/9.23.0/firebase-database.js";
+
+  const firebaseConfig = {
+    apiKey: "AIzaSyDz2pQHsSweV2j8vItqOLvqo65rcplzVbc",
+    authDomain: "feelingdoge.firebaseapp.com",
+    projectId: "feelingdoge",
+    storageBucket: "feelingdoge.firebasestorage.app",
+    messagingSenderId: "614859671333",
+    appId: "1:614859671333:web:cb421bdc7fcf478be33ccc"
+  };
+
+  const app = initializeApp(firebaseConfig);
+  const db = getDatabase(app);
+
+  window.saveFeeling = function () {
+    const userId = document.getElementById("userId").value.trim();
+    const zone = document.getElementById("zone").value;
+    const onBreak = document.getElementById("break").checked;
+
+    if (!userId || !zone) {
+      alert("User ID and zone required");
+      return;
+    }
+
+    set(ref(db, `feelings/${userId}`), {
+      zone,
+      break: onBreak,
+      timestamp: Date.now()
     });
-}
 
-auth.signInAnonymously();
+    alert("Saved!");
+  };
 
-auth.onAuthStateChanged(user=>{
-  if(user){
-    status.textContent = "Connected";
-    app.style.display = "block";
-    load();
-  }
-});
+  window.respond = function () {
+    const from = document.getElementById("userId").value.trim();
+    const target = document.getElementById("targetUser").value.trim();
+    const zone = document.getElementById("responseZone").value;
+
+    if (!from || !target || !zone) {
+      alert("Fill all fields");
+      return;
+    }
+
+    push(ref(db, `feelings/${target}/responses`), {
+      from,
+      zone,
+      timestamp: Date.now()
+    });
+
+    alert("Response sent!");
+  };
+
+  window.exportJSON = async function () {
+    const snapshot = await get(ref(db, "feelings"));
+    const data = snapshot.val();
+
+    const json = JSON.stringify(data, null, 2);
+    document.getElementById("output").textContent = json;
+
+    const blob = new Blob([json], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "feelings.json";
+    a.click();
+
+    URL.revokeObjectURL(url);
+  };
 </script>
 
 </body>
