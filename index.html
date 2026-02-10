@@ -1,21 +1,26 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <title>Feeling Tracker</title>
-  <style>
-    body { font-family: Arial; padding: 20px; }
-    button { margin: 5px 0; }
-    select, input { margin: 5px 0; }
-    pre { background: #f4f4f4; padding: 10px; max-height: 300px; overflow: auto; }
-  </style>
+<meta charset="UTF-8">
+<title>Feeling Tracker with Notifications</title>
+<style>
+body { font-family: Arial; padding: 20px; }
+select, input { margin: 5px 0; }
+button { margin: 5px 5px 5px 0; }
+pre { background: #f4f4f4; padding: 10px; max-height: 300px; overflow: auto; }
+.badge { padding: 3px 8px; border-radius: 5px; color: #fff; margin-right: 5px; }
+.green { background: #4CAF50; }
+.blue { background: #2196F3; }
+.yellow { background: #FFEB3B; color: #000; }
+.red { background: #F44336; }
+</style>
 </head>
 <body>
 
 <h2>Feeling Tracker</h2>
 
 <label>User ID:</label><br>
-<input id="userId" placeholder="your name or id"><br><br>
+<input id="userId" placeholder="Your name"><br><br>
 
 <label>Zone:</label><br>
 <select id="zone">
@@ -26,18 +31,14 @@
   <option value="red">🔴 Red</option>
 </select><br><br>
 
-<label>
-  <input type="checkbox" id="break">
-  On Break
-</label><br><br>
+<label><input type="checkbox" id="break"> On Break</label><br><br>
 
 <button onclick="saveFeeling()">Save Feeling</button>
+<button onclick="exportJSON()">Export JSON</button>
 
 <hr>
-
 <h3>Respond to Someone</h3>
-
-<input id="targetUser" placeholder="target user id"><br>
+<input id="targetUser" placeholder="Target User ID"><br>
 <select id="responseZone">
   <option value="">Select zone</option>
   <option value="green">🟢 Green</option>
@@ -45,88 +46,138 @@
   <option value="yellow">🟡 Yellow</option>
   <option value="red">🔴 Red</option>
 </select><br><br>
-
 <button onclick="respond()">Send Response</button>
 
 <hr>
-
-<button onclick="exportJSON()">Export JSON</button>
-
+<h3>Current Feelings:</h3>
 <pre id="output"></pre>
 
-<!-- Firebase v9 -->
 <script type="module">
-  import { initializeApp } from "https://www.gstatic.com/firebasejs/9.23.0/firebase-app.js";
-  import { getDatabase, ref, set, push, get } from "https://www.gstatic.com/firebasejs/9.23.0/firebase-database.js";
+import { initializeApp } from "https://www.gstatic.com/firebasejs/9.23.0/firebase-app.js";
+import { getDatabase, ref, set, push, onValue, get } from "https://www.gstatic.com/firebasejs/9.23.0/firebase-database.js";
 
-  const firebaseConfig = {
-    apiKey: "AIzaSyDz2pQHsSweV2j8vItqOLvqo65rcplzVbc",
-    authDomain: "feelingdoge.firebaseapp.com",
-    projectId: "feelingdoge",
-    storageBucket: "feelingdoge.firebasestorage.app",
-    messagingSenderId: "614859671333",
-    appId: "1:614859671333:web:cb421bdc7fcf478be33ccc"
-  };
+// --- Firebase config ---
+const firebaseConfig = {
+  apiKey: "AIzaSyDz2pQHsSweV2j8vItqOLvqo65rcplzVbc",
+  authDomain: "feelingdoge.firebaseapp.com",
+  databaseURL: "https://feelingdoge-default-rtdb.firebaseio.com",
+  projectId: "feelingdoge",
+  storageBucket: "feelingdoge.firebasestorage.app",
+  messagingSenderId: "614859671333",
+  appId: "1:614859671333:web:cb421bdc7fcf478be33ccc"
+};
 
-  const app = initializeApp(firebaseConfig);
-  const db = getDatabase(app);
+// Initialize Firebase
+const app = initializeApp(firebaseConfig);
+const db = getDatabase(app);
 
-  window.saveFeeling = function () {
-    const userId = document.getElementById("userId").value.trim();
-    const zone = document.getElementById("zone").value;
-    const onBreak = document.getElementById("break").checked;
+// --- Request notification permission ---
+if (Notification.permission !== "granted") {
+  Notification.requestPermission();
+}
 
-    if (!userId || !zone) {
-      alert("User ID and zone required");
-      return;
+// --- Save or update user's feeling ---
+window.saveFeeling = async function() {
+  const userId = document.getElementById("userId").value.trim();
+  const zone = document.getElementById("zone").value;
+  const onBreak = document.getElementById("break").checked;
+
+  if (!userId || !zone) { alert("User ID and zone required"); return; }
+
+  await set(ref(db, `feelings/${userId}`), {
+    zone,
+    break: onBreak,
+    timestamp: Date.now()
+  });
+};
+
+// --- Respond to another user's zone ---
+window.respond = async function() {
+  const from = document.getElementById("userId").value.trim();
+  const target = document.getElementById("targetUser").value.trim();
+  const zone = document.getElementById("responseZone").value;
+
+  if (!from || !target || !zone) { alert("Fill all fields"); return; }
+
+  await push(ref(db, `feelings/${target}/responses`), {
+    from,
+    zone,
+    timestamp: Date.now()
+  });
+};
+
+// --- Export all data to JSON ---
+window.exportJSON = async function() {
+  const snapshot = await get(ref(db, "feelings"));
+  const data = snapshot.val();
+  const json = JSON.stringify(data, null, 2);
+
+  const blob = new Blob([json], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "feelings.json";
+  a.click();
+  URL.revokeObjectURL(url);
+};
+
+// --- Keep track of known state to prevent duplicate notifications ---
+let lastFeelings = {};
+let lastResponses = {};
+
+// --- Listen to all feelings ---
+const feelingsRef = ref(db, "feelings");
+onValue(feelingsRef, (snapshot) => {
+  const data = snapshot.val() || {};
+  renderFeelings(data);
+
+  const currentUserId = document.getElementById("userId").value.trim();
+
+  // Notify for zone updates
+  for (const user in data) {
+    const entry = data[user];
+    if (user !== currentUserId) {
+      if (!lastFeelings[user] || lastFeelings[user].timestamp !== entry.timestamp) {
+        if (Notification.permission === "granted") {
+          new Notification(`${user} updated their zone`, {
+            body: `Zone: ${entry.zone}${entry.break ? " (BREAK)" : ""}`
+          });
+        }
+      }
     }
 
-    set(ref(db, `feelings/${userId}`), {
-      zone,
-      break: onBreak,
-      timestamp: Date.now()
-    });
-
-    alert("Saved!");
-  };
-
-  window.respond = function () {
-    const from = document.getElementById("userId").value.trim();
-    const target = document.getElementById("targetUser").value.trim();
-    const zone = document.getElementById("responseZone").value;
-
-    if (!from || !target || !zone) {
-      alert("Fill all fields");
-      return;
+    // Notify for responses to current user
+    if (user === currentUserId && entry.responses) {
+      for (const key in entry.responses) {
+        const r = entry.responses[key];
+        if (!lastResponses[key]) {
+          if (Notification.permission === "granted") {
+            new Notification(`Response from ${r.from}`, {
+              body: `Zone: ${r.zone}`
+            });
+          }
+          lastResponses[key] = true;
+        }
+      }
     }
+  }
 
-    push(ref(db, `feelings/${target}/responses`), {
-      from,
-      zone,
-      timestamp: Date.now()
-    });
+  lastFeelings = data;
+});
 
-    alert("Response sent!");
-  };
+// --- Render all users and their zones ---
+function renderFeelings(data) {
+  const output = document.getElementById("output");
+  output.innerHTML = "";
+  if (!data) { output.textContent = "No data yet"; return; }
 
-  window.exportJSON = async function () {
-    const snapshot = await get(ref(db, "feelings"));
-    const data = snapshot.val();
-
-    const json = JSON.stringify(data, null, 2);
-    document.getElementById("output").textContent = json;
-
-    const blob = new Blob([json], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "feelings.json";
-    a.click();
-
-    URL.revokeObjectURL(url);
-  };
+  for (const user in data) {
+    const entry = data[user];
+    const badge = `<span class="badge ${entry.zone}">${entry.zone.toUpperCase()}</span>`;
+    const br = entry.break ? "(BREAK)" : "";
+    output.innerHTML += `${user}: ${badge} ${br}\n`;
+  }
+}
 </script>
-
 </body>
 </html>
