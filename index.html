@@ -45,14 +45,8 @@ label { display: block; margin-top: 10px; font-weight: bold; }
 <h3>Respond to Someone</h3>
 <label>Target User ID:</label>
 <input id="targetUser" placeholder="Target User ID"><br>
-<label>Response Zone:</label>
-<select id="responseZone">
-  <option value="">Select zone</option>
-  <option value="green">🟢 Green</option>
-  <option value="blue">🔵 Blue</option>
-  <option value="yellow">🟡 Yellow</option>
-  <option value="red">🔴 Red</option>
-</select><br>
+<label>Note/Message:</label>
+<textarea id="responseNote" placeholder="Optional note or message..." style="width: 100%; max-width: 300px; height: 80px; padding: 8px; box-sizing: border-box; resize: vertical;"></textarea><br>
 <button onclick="respond()">Send Response</button>
 
 <hr>
@@ -116,10 +110,10 @@ window.saveFeeling = async function() {
 window.respond = async function() {
   const from = document.getElementById("userId").value.trim();
   const target = document.getElementById("targetUser").value.trim();
-  const zone = document.getElementById("responseZone").value;
+  const note = document.getElementById("responseNote").value.trim();
 
-  if (!from || !target || !zone) { 
-    alert("Fill all fields"); 
+  if (!from || !target) { 
+    alert("User ID and Target User ID are required"); 
     return; 
   }
 
@@ -131,12 +125,12 @@ window.respond = async function() {
   try {
     await push(ref(db, `feelings/${target}/responses`), {
       from,
-      zone,
+      note: note || "(No message)",
       timestamp: Date.now()
     });
     alert(`Response sent to ${target}!`);
     document.getElementById("targetUser").value = "";
-    document.getElementById("responseZone").value = "";
+    document.getElementById("responseNote").value = "";
   } catch (error) {
     console.error("Error sending response:", error);
     alert("Error sending response. Check console for details.");
@@ -202,8 +196,7 @@ onValue(feelingsRef, (snapshot) => {
         if (!lastResponses[key]) {
           if (Notification.permission === "granted") {
             new Notification(`Response from ${r.from}`, {
-              body: `Zone: ${r.zone.toUpperCase()}`,
-              icon: getZoneIcon(r.zone)
+              body: r.note || "(No message)"
             });
           }
           lastResponses[key] = true;
@@ -256,9 +249,8 @@ function renderFeelings(data) {
     if (entry.responses) {
       for (const key in entry.responses) {
         const r = entry.responses[key];
-        const respBadge = `<span class="badge ${r.zone}">${r.zone.toUpperCase()}</span>`;
         const respTime = new Date(r.timestamp).toLocaleString();
-        output.innerHTML += `  <span class="response">↳ Response from <strong>${r.from}</strong>: ${respBadge} <small>(${respTime})</small></span>\n`;
+        output.innerHTML += `  <span class="response">↳ Response from <strong>${r.from}</strong>: "${r.note}" <small>(${respTime})</small></span>\n`;
       }
     }
     
