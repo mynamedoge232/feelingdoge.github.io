@@ -1,0 +1,88 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Feeling Tracker (Cloud)</title>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+
+<script>
+/* 🔴 PASTE YOUR FIREBASE CONFIG HERE */
+const firebaseConfig = {
+  apiKey: "PASTE_HERE",
+  authDomain: "PASTE_HERE",
+  projectId: "PASTE_HERE"
+};
+
+firebase.initializeApp(firebaseConfig);
+const auth = firebase.auth();
+const db = firebase.firestore();
+</script>
+</head>
+
+<body>
+<h2>Feeling Tracker</h2>
+
+<div id="login">
+  <input id="email" placeholder="Email"><br>
+  <input id="password" type="password" placeholder="Password"><br>
+  <button onclick="signup()">Sign Up</button>
+  <button onclick="login()">Login</button>
+</div>
+
+<div id="app" style="display:none">
+  <p>Select Zone:</p>
+  <button onclick="save('green')">Green 😊</button>
+  <button onclick="save('yellow')">Yellow 😐</button>
+  <button onclick="save('red')">Red 😡</button>
+  <button onclick="save('blue')">Blue 😴</button>
+  <ul id="list"></ul>
+</div>
+
+<script>
+function autoBreak(zone){
+  return (zone === 'red' || zone === 'blue');
+}
+
+function save(zone){
+  const user = auth.currentUser;
+  if(!user) return;
+
+  db.collection("entries").add({
+    uid: user.uid,
+    zone,
+    needBreak: autoBreak(zone),
+    time: new Date().toISOString()
+  });
+}
+
+function load(){
+  const user = auth.currentUser;
+  db.collection("entries")
+    .where("uid","==",user.uid)
+    .orderBy("time","desc")
+    .onSnapshot(snap=>{
+      list.innerHTML="";
+      snap.forEach(d=>{
+        const e=d.data();
+        list.innerHTML+=`<li>${e.time} | ${e.zone} | break: ${e.needBreak}</li>`;
+      });
+    });
+}
+
+auth.onAuthStateChanged(u=>{
+  login.style.display = u?"none":"block";
+  app.style.display = u?"block":"none";
+  if(u) load();
+});
+
+function signup(){
+  auth.createUserWithEmailAndPassword(email.value,password.value);
+}
+function login(){
+  auth.signInWithEmailAndPassword(email.value,password.value);
+}
+</script>
+</body>
+</html>
