@@ -9,6 +9,8 @@ body { font-family: Arial, sans-serif; padding: 20px; max-width: 800px; margin: 
 select, input { margin: 5px 0; padding: 8px; width: 100%; max-width: 300px; box-sizing: border-box; }
 button { margin: 5px 5px 5px 0; padding: 10px 15px; cursor: pointer; background: #2196F3; color: white; border: none; border-radius: 4px; }
 button:hover { background: #1976D2; }
+button.delete-btn { background: #F44336; padding: 5px 10px; font-size: 0.85em; margin-left: 10px; }
+button.delete-btn:hover { background: #D32F2F; }
 pre { background: #f4f4f4; padding: 10px; max-height: 400px; overflow: auto; border-radius: 4px; }
 .badge { padding: 3px 8px; border-radius: 5px; color: #fff; margin-right: 5px; font-weight: bold; }
 .green { background: #4CAF50; }
@@ -16,6 +18,7 @@ pre { background: #f4f4f4; padding: 10px; max-height: 400px; overflow: auto; bor
 .yellow { background: #FFEB3B; color: #000; }
 .red { background: #F44336; }
 .response { margin-left: 20px; font-size: 0.9em; color: #666; }
+.user-entry { margin-bottom: 10px; }
 hr { margin: 20px 0; border: none; border-top: 1px solid #ddd; }
 label { display: block; margin-top: 10px; font-weight: bold; }
 </style>
@@ -55,7 +58,7 @@ label { display: block; margin-top: 10px; font-weight: bold; }
 
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/9.23.0/firebase-app.js";
-import { getDatabase, ref, set, push, onValue, get } from "https://www.gstatic.com/firebasejs/9.23.0/firebase-database.js";
+import { getDatabase, ref, set, push, onValue, get, remove } from "https://www.gstatic.com/firebasejs/9.23.0/firebase-database.js";
 
 // --- Firebase config ---
 const firebaseConfig = {
@@ -157,6 +160,21 @@ window.exportJSON = async function() {
   }
 };
 
+// --- Delete a user's feeling ---
+window.deleteFeeling = async function(userId) {
+  if (!confirm(`Are you sure you want to delete ${userId}'s feeling?`)) {
+    return;
+  }
+
+  try {
+    await remove(ref(db, `feelings/${userId}`));
+    alert(`${userId}'s feeling has been removed.`);
+  } catch (error) {
+    console.error("Error deleting feeling:", error);
+    alert("Error deleting feeling. Check console for details.");
+  }
+};
+
 // --- Listen to all feelings ---
 const feelingsRef = ref(db, "feelings");
 onValue(feelingsRef, (snapshot) => {
@@ -242,8 +260,9 @@ function renderFeelings(data) {
     const badge = `<span class="badge ${entry.zone}">${entry.zone.toUpperCase()}</span>`;
     const br = entry.break ? " (ON BREAK)" : "";
     const time = new Date(entry.timestamp).toLocaleString();
+    const deleteBtn = `<button class="delete-btn" onclick="deleteFeeling('${user}')">🗑️ Delete</button>`;
     
-    output.innerHTML += `<strong>${user}</strong>: ${badge} ${br} <small>(${time})</small>\n`;
+    output.innerHTML += `<div class="user-entry"><strong>${user}</strong>: ${badge} ${br} <small>(${time})</small>${deleteBtn}\n`;
     
     // Show responses if any
     if (entry.responses) {
@@ -254,7 +273,7 @@ function renderFeelings(data) {
       }
     }
     
-    output.innerHTML += "\n";
+    output.innerHTML += "</div>\n";
   }
 }
 </script>
