@@ -45,12 +45,11 @@ label { display: block; margin-top: 10px; font-weight: bold; }
 <button onclick="exportJSON()">Export JSON</button>
 
 <hr>
-<h3>Respond to Someone</h3>
-<label>Target User ID:</label>
-<input id="targetUser" placeholder="Target User ID"><br>
-<label>Note/Message:</label>
-<textarea id="responseNote" placeholder="Optional note or message..." style="width: 100%; max-width: 300px; height: 80px; padding: 8px; box-sizing: border-box; resize: vertical;"></textarea><br>
-<button onclick="respond()">Send Response</button>
+<h3>Auto-Notification Settings</h3>
+<p>Get notified when new feelings are added (checks every 30 seconds)</p>
+<label><input type="checkbox" id="notifyGrant" style="width: auto;" checked> Notify "Grant"</label><br>
+<label><input type="checkbox" id="notifyMrsGibb" style="width: auto;" checked> Notify "Mrs Gibb"</label><br>
+<p><small>Notifications will only appear for users checked above when new entries are detected.</small></p>
 
 <hr>
 <h3>Current Feelings:</h3>
@@ -84,6 +83,47 @@ if (Notification.permission !== "granted") {
 let lastFeelings = {};
 let lastResponses = {};
 let isFirstLoad = true;
+let knownUsers = new Set(); // Track users we've already seen
+
+// --- Check for new entries every 30 seconds ---
+setInterval(() => {
+  checkForNewEntries();
+}, 30000); // 30 seconds
+
+async function checkForNewEntries() {
+  try {
+    const snapshot = await get(ref(db, "feelings"));
+    const data = snapshot.val() || {};
+    
+    const notifyGrant = document.getElementById("notifyGrant").checked;
+    const notifyMrsGibb = document.getElementById("notifyMrsGibb").checked;
+    
+    for (const user in data) {
+      const entry = data[user];
+      
+      // Check if this is a new user we haven't seen before
+      if (!knownUsers.has(user)) {
+        knownUsers.add(user);
+        
+        // Check if we should notify for this user
+        const shouldNotify = 
+          (user.toLowerCase() === "grant" && notifyGrant) || 
+          (user.toLowerCase() === "mrs gibb" && notifyMrsGibb) ||
+          (user.toLowerCase() === "mrs. gibb" && notifyMrsGibb) ||
+          (user.toLowerCase() === "mrsgibb" && notifyMrsGibb);
+        
+        if (shouldNotify && Notification.permission === "granted") {
+          new Notification(`New entry from ${user}!`, {
+            body: `Zone: ${entry.zone.toUpperCase()}${entry.break ? " (ON BREAK)" : ""}`,
+            icon: getZoneIcon(entry.zone)
+          });
+        }
+      }
+    }
+  } catch (error) {
+    console.error("Error checking for new entries:", error);
+  }
+}
 
 // --- Save or update user's feeling ---
 window.saveFeeling = async function() {
@@ -106,6 +146,157 @@ window.saveFeeling = async function() {
   } catch (error) {
     console.error("Error saving feeling:", error);
     alert("Error saving feeling. Check console for details.");
+  }
+};
+
+// --- Respond to another user's zone ---
+window.respond = async function() {
+  const from = document.getElementById("userId").value.trim();
+  const target = document.getElementById("targetUser").value.trim();
+  const note = document.getElementById("responseNote").value.trim();
+
+  if (!from || !target) { 
+    alert("User ID and Target User ID are required"); 
+    return; 
+  }
+
+  if (from === target) {
+    alert("You cannot respond to yourself!");
+    return;
+  }
+
+  // Just show a local notification - doesn't save to database
+  if (Notification.permission === "granted") {
+    new Notification(`Test: Response to ${target}`, {
+      body: `From ${from}: ${note || "(No message)"}`
+    });
+    alert(`Notification sent! (This is a local test - only you see it)`);
+  } else {
+    alert("Please enable notifications first!");
+  }
+  
+  document.getElementById("targetUser").value = "";
+  document.getElementById("responseNote").value = "";
+};
+
+// --- Export all data to JSON ---
+window.exportJSON = async function() {
+  try {
+    const snapshot = await get(ref(db, "feelings"));
+    const data = snapshot.val();
+    const json = JSON.stringify(data, null, 2);
+
+    const blob = new Blob([json], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `feelings-${new Date().toISOString().split('T')[0]}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  } catch (error) {
+    console.error("Error exporting data:", error);
+    alert("Error exporting data. Check console for details.");
+  }
+};
+
+// --- Delete a user's feeling ---
+window.deleteFeeling = async function(userId) {
+  if (!confirm(`Are you sure you want to delete ${userId}'s feeling?`)) {
+    return;
+  }
+
+  try {
+    await remove(ref(db, `feelings/${userId}`));
+    alert(`${userId}'s feeling has been removed.`);
+  } catch (error) {
+    console.error("Error deleting feeling:", error);
+    alert("Error deleting feeling. Check console for details.");
+  }
+};
+
+// --- Listen to all feelings ---
+const feelingsRef = ref(db, "feelings");
+onValue(feelingsRef, (snapshot) => {
+  const data = snapshot.val() || {};
+  renderFeelings(data);
+
+  const currentUserId = document.getElementById("userId").value.trim();
+
+  // Skip notifications on first load
+  if (isFirstLoad) {
+    lastFeelings = JSON.parse(JSON.stringify(data));
+    // Initialize known users with existing users
+    for (const user in data) {
+      knownUsers.add(user);
+    }
+    isFirstLoad = false;
+    return;
+  }
+
+  // Notify for zone updates
+  for (const user in data) {
+    const entry = data[user];
+    
+    // Check if this is a new zone update (not on first load)
+    if (user !== currentUserId && entry.timestamp) {
+      const lastEntry = lastFeelings[user];
+      if (!lastEntry || lastEntry.timestamp !== entry.timestamp) {
+        if (Notification.permission === "granted") {
+          new Notification(`${user} updated their zone`, {
+            body: `Zone: ${entry.zone.toUpperCase()}${entry.break ? " (ON BREAK)" : ""}`,
+            icon: getZoneIcon(entry.zone)
+          });
+        }
+      }
+    }
+  }
+
+  // Update last known state
+  lastFeelings = JSON.parse(JSON.stringify(data));
+}, (error) => {
+  console.error("Database error:", error);
+  document.getElementById("output").textContent = "Error loading data. Check console.";
+});
+
+// --- Helper function to get zone emoji ---
+function getZoneIcon(zone) {
+  const icons = {
+    green: '🟢',
+    blue: '🔵',
+    yellow: '🟡',
+    red: '🔴'
+  };
+  return icons[zone] || '⚪';
+}
+
+// --- Render all users and their zones ---
+function renderFeelings(data) {
+  const output = document.getElementById("output");
+  output.innerHTML = "";
+  
+  if (!data || Object.keys(data).length === 0) { 
+    output.textContent = "No data yet. Add your feeling to get started!"; 
+    return; 
+  }
+
+  const users = Object.keys(data).sort();
+  
+  for (const user of users) {
+    const entry = data[user];
+    if (!entry.zone) continue; // Skip invalid entries
+    
+    const badge = `<span class="badge ${entry.zone}">${entry.zone.toUpperCase()}</span>`;
+    const br = entry.break ? " (ON BREAK)" : "";
+    const time = new Date(entry.timestamp).toLocaleString();
+    const deleteBtn = `<button class="delete-btn" onclick="deleteFeeling('${user}')">🗑️ Delete</button>`;
+    
+    output.innerHTML += `<div class="user-entry"><strong>${user}</strong>: ${badge} ${br} <small>(${time})</small>${deleteBtn}</div>\n`;
+  }
+}
+</script>
+</body>
+</html>
+,    alert("Error saving feeling. Check console for details.");
   }
 };
 
