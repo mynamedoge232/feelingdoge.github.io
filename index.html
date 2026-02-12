@@ -1,111 +1,91 @@
-<!DOCTYPE html>
-<html lang="en">
+<!doctype html>
+<html>
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Feeling Tracker with Notifications</title>
-<style>
-body { font-family: Arial, sans-serif; padding: 20px; max-width: 800px; margin: 0 auto; }
-select, input { margin: 5px 0; padding: 8px; width: 100%; max-width: 300px; box-sizing: border-box; }
-button { margin: 5px 5px 5px 0; padding: 10px 15px; cursor: pointer; background: #2196F3; color: white; border: none; border-radius: 4px; }
-button:hover { background: #1976D2; }
-button.delete-btn { background: #F44336; padding: 5px 10px; font-size: 0.85em; margin-left: 10px; }
-button.delete-btn:hover { background: #D32F2F; }
-pre { background: #f4f4f4; padding: 10px; max-height: 400px; overflow: auto; border-radius: 4px; }
-.badge { padding: 3px 8px; border-radius: 5px; color: #fff; margin-right: 5px; font-weight: bold; }
-.green { background: #4CAF50; }
-.blue { background: #2196F3; }
-.yellow { background: #FFEB3B; color: #000; }
-.red { background: #F44336; }
-.response { margin-left: 20px; font-size: 0.9em; color: #666; }
-.user-entry { margin-bottom: 10px; }
-hr { margin: 20px 0; border: none; border-top: 1px solid #ddd; }
-label { display: block; margin-top: 10px; font-weight: bold; }
-</style>
-</head>
-<body>
+<meta charset="utf-8">
+<title>Feeling Tracker (Cloud)</title>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
 
-<h2>Feeling Tracker</h2>
-
-<label>User ID:</label>
-<input id="userId" placeholder="Your name"><br>
-
-<label>Zone:</label>
-<select id="zone">
-  <option value="">Select zone</option>
-  <option value="green">🟢 Green</option>
-  <option value="blue">🔵 Blue</option>
-  <option value="yellow">🟡 Yellow</option>
-  <option value="red">🔴 Red</option>
-</select><br>
-
-<label><input type="checkbox" id="break" style="width: auto;"> On Break</label><br>
-
-<button onclick="saveFeeling()">Save Feeling</button>
-<button onclick="exportJSON()">Export JSON</button>
-
-<hr>
-<h3>Auto-Notification Settings</h3>
-<p>Get notified when new feelings are added (checks every 30 seconds)</p>
-<label><input type="checkbox" id="notifyGrant" style="width: auto;" checked> Notify "Grant"</label><br>
-<label><input type="checkbox" id="notifyMrsGibb" style="width: auto;" checked> Notify "Mrs Gibb"</label><br>
-<p><small>Notifications will only appear for users checked above when new entries are detected.</small></p>
-
-<hr>
-<h3>Current Feelings:</h3>
-<pre id="output">Loading...</pre>
-
-<script type="module">
-import { initializeApp } from "https://www.gstatic.com/firebasejs/9.23.0/firebase-app.js";
-import { getDatabase, ref, set, push, onValue, get, remove } from "https://www.gstatic.com/firebasejs/9.23.0/firebase-database.js";
-
-// --- Firebase config ---
+<script>
+/* 🔴 PASTE YOUR FIREBASE CONFIG HERE */
 const firebaseConfig = {
-  apiKey: "AIzaSyDz2pQHsSweV2j8vItqOLvqo65rcplzVbc",
-  authDomain: "feelingdoge.firebaseapp.com",
-  databaseURL: "https://feelingdoge-default-rtdb.firebaseio.com",
-  projectId: "feelingdoge",
-  storageBucket: "feelingdoge.firebasestorage.app",
-  messagingSenderId: "614859671333",
-  appId: "1:614859671333:web:cb421bdc7fcf478be33ccc"
+  apiKey: "PASTE_HERE",
+  authDomain: "PASTE_HERE",
+  projectId: "PASTE_HERE"
 };
 
-// Initialize Firebase
-const app = initializeApp(firebaseConfig);
-const db = getDatabase(app);
+firebase.initializeApp(firebaseConfig);
+const auth = firebase.auth();
+const db = firebase.firestore();
+</script>
+</head>
 
-// --- Request notification permission ---
-if (Notification.permission !== "granted") {
-  Notification.requestPermission();
+<body>
+<h2>Feeling Tracker</h2>
+
+<div id="login">
+  <input id="email" placeholder="Email"><br>
+  <input id="password" type="password" placeholder="Password"><br>
+  <button onclick="signup()">Sign Up</button>
+  <button onclick="login()">Login</button>
+</div>
+
+<div id="app" style="display:none">
+  <p>Select Zone:</p>
+  <button onclick="save('green')">Green 😊</button>
+  <button onclick="save('yellow')">Yellow 😐</button>
+  <button onclick="save('red')">Red 😡</button>
+  <button onclick="save('blue')">Blue 😴</button>
+  <ul id="list"></ul>
+</div>
+
+<script>
+function autoBreak(zone){
+  return (zone === 'red' || zone === 'blue');
 }
 
-// --- Keep track of known state to prevent duplicate notifications ---
-let lastFeelings = {};
-let lastResponses = {};
-let isFirstLoad = true;
-let knownUsers = new Set(); // Track users we've already seen
+function save(zone){
+  const user = auth.currentUser;
+  if(!user) return;
 
-// --- Check for new entries every 30 seconds ---
-setInterval(() => {
-  checkForNewEntries();
-}, 30000); // 30 seconds
+  db.collection("entries").add({
+    uid: user.uid,
+    zone,
+    needBreak: autoBreak(zone),
+    time: new Date().toISOString()
+  });
+}
 
-async function checkForNewEntries() {
-  try {
-    const snapshot = await get(ref(db, "feelings"));
-    const data = snapshot.val() || {};
-    
-    const notifyGrant = document.getElementById("notifyGrant").checked;
-    const notifyMrsGibb = document.getElementById("notifyMrsGibb").checked;
-    
-    for (const user in data) {
-      const entry = data[user];
-      
-      // Check if this is a new user we haven't seen before
-      if (!knownUsers.has(user)) {
-        knownUsers.add(user);
-        
-        // Check if we should notify for this user
+function load(){
+  const user = auth.currentUser;
+  db.collection("entries")
+    .where("uid","==",user.uid)
+    .orderBy("time","desc")
+    .onSnapshot(snap=>{
+      list.innerHTML="";
+      snap.forEach(d=>{
+        const e=d.data();
+        list.innerHTML+=`<li>${e.time} | ${e.zone} | break: ${e.needBreak}</li>`;
+      });
+    });
+}
+
+auth.onAuthStateChanged(u=>{
+  login.style.display = u?"none":"block";
+  app.style.display = u?"block":"none";
+  if(u) load();
+});
+
+function signup(){
+  auth.createUserWithEmailAndPassword(email.value,password.value);
+}
+function login(){
+  auth.signInWithEmailAndPassword(email.value,password.value);
+}
+</script>
+</body>
+</html>        // Check if we should notify for this user
         const shouldNotify = 
           (user.toLowerCase() === "grant" && notifyGrant) || 
           (user.toLowerCase() === "mrs gibb" && notifyMrsGibb) ||
